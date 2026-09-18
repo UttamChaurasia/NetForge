@@ -1,144 +1,298 @@
 # NetForge
 
-A multithreaded TCP/UDP server built in C — a phased systems-programming project covering socket programming, concurrency, protocol design, I/O multiplexing, and packet analysis.
+A Linux-based networking and systems programming project written in C.
 
-## What's inside
+NetForge is a hands-on implementation of core networking and operating-system concepts, progressing from a basic TCP client/server to concurrent servers, custom application-layer framing, event-driven I/O, UDP communication, daemonization, and packet capture.
 
-| File | Phase | What it covers |
-|------|-------|----------------|
-| `src/server.c` | 1–7 | TCP server: single-client echo → fork → pthreads + mutex → custom protocol → broadcast chat → signal handling → daemonize |
-| `src/client.c` | 1–7 | Interactive CLI client with background receiver thread |
-| `src/protocol.c/h` | 4 | Length-prefixed message framing (the `read_n_bytes` loop, `htonl`/`ntohl`) |
-| `src/daemon.c/h` | 7 | Double-fork daemonization, PID file |
-| `src/server_epoll.c` | 9 | Single-threaded epoll event loop — same broadcast chat, zero pthreads |
-| `src/udp_server.c` | 10 | UDP echo: `SOCK_DGRAM`, `recvfrom`/`sendto` |
-| `src/pcap_tool.c` | 11 | libpcap: walk Ethernet→IP→TCP headers, parse NetForge frame from raw bytes |
+The project is designed to explore how network services work internally rather than relying entirely on high-level networking frameworks.
 
-## Environment
+---
 
-- **OS**: Linux (WSL2, native, or VM)
-- **Compiler**: gcc (tested with gcc 15 on Ubuntu)
-- **Required packages**:
-  ```bash
-  # Ubuntu/Debian
-  sudo apt-get install -y gcc make gdb libpcap-dev
+## Features
 
-  # Alpine
-  apk add gcc make gdb musl-dev libpcap-dev
-  ```
+- TCP client-server communication
+- TCP byte-stream handling
+- Custom length-prefixed application protocol
+- Concurrent client handling using `fork()`
+- Multi-threaded client handling using POSIX threads
+- Thread-safe client registry using mutexes
+- Server-side message broadcasting
+- Graceful signal-based shutdown
+- `SIGCHLD` handling for child processes
+- `SIGPIPE` protection
+- Event-driven TCP server using `epoll`
+- UDP server implementation
+- Linux daemonization
+- PID file management
+- Packet capture and inspection using `libpcap`
+- Automated system-level testing
+- Make-based build system
 
-## Build
+---
 
-```bash
-make            # build everything (debug)
-make release    # build everything optimised
-make server     # pthreads server only
-make client     # client only
-make epoll_server
-make udp_server
-make pcap_tool  # requires libpcap-dev
-make clean
-```
+## Architecture
 
-All binaries land in `build/`.
+```text
+                         NetForge
+                            |
+          +-----------------+------------------+
+          |                 |                  |
+       TCP Stack         UDP Stack        Packet Capture
+          |                 |                  |
+    +-----+------+          |             libpcap
+    |            |          |
+ TCP Server   TCP Client   UDP Server
+    |
+    +----------------------+
+    |                      |
+ fork() / pthreads       epoll
+    |                      |
+ concurrent            event-driven
+ clients               I/O
+    |
+    +----------------------+
+    |
+ Custom Protocol
+    |
+ [4-byte length][payload]
+Project Structure
+NetForge/
+├── .gitignore
+├── Makefile
+├── README.md
+├── LICENSE
+├── test_all.sh
+│
+├── build/
+│   └── .gitkeep
+│
+└── src/
+    ├── client.c
+    ├── server.c
+    ├── server_epoll.c
+    ├── udp_server.c
+    ├── protocol.c
+    ├── protocol.h
+    ├── daemon.c
+    ├── daemon.h
+    └── pcap_tool.c
+Components
+1. TCP Client and Server
 
-## Running — Phase by Phase
+The basic TCP implementation demonstrates:
 
-### Phase 1–6: pthreads broadcast chat server
+socket()
+bind()
+listen()
+accept()
+connect()
+send()
+recv()
+close()
 
-Terminal 1 — server:
-```bash
+The server accepts TCP clients and handles communication with them.
+
+2. Concurrent TCP Server
+
+NetForge explores multiple concurrency models.
+
+Process-based concurrency
+             Server
+                |
+             accept()
+                |
+        +-------+-------+
+        |               |
+      Client 1        Client 2
+        |               |
+      fork()           fork()
+
+Each client can be handled by a separate process.
+
+Thread-based concurrency
+             Server
+                |
+             accept()
+                |
+        +-------+-------+
+        |       |       |
+     Thread1 Thread2 Thread3
+        |       |       |
+      Client  Client  Client
+
+A mutex-protected client registry is used for shared state.
+
+3. Custom Application Protocol
+
+TCP provides a byte stream rather than message boundaries.
+
+NetForge therefore implements a length-prefixed protocol:
+
++----------------------+----------------------+
+| 4-byte message size  |      payload         |
++----------------------+----------------------+
+       uint32_t
+       network byte order
+
+The protocol uses:
+
+htonl()
+ntohl()
+
+to maintain network byte order.
+
+This allows the receiver to determine exactly how many bytes belong to one application-level message.
+
+4. Event-Driven Server
+
+server_epoll.c implements an event-driven TCP server using Linux epoll.
+
+             epoll instance
+                   |
+             epoll_wait()
+                   |
+        +----------+----------+
+        |          |          |
+      Client 1   Client 2   Client 3
+       ready      ready      ready
+
+This demonstrates readiness-based I/O without creating a dedicated thread or process for every connection.
+
+5. UDP Server
+
+udp_server.c implements connectionless UDP communication using:
+
+recvfrom()
+sendto()
+
+Unlike TCP, UDP preserves datagram boundaries.
+
+6. Daemon Mode
+
+NetForge contains Linux daemonization functionality using the traditional double-fork approach.
+
+The daemon component demonstrates:
+
+fork()
+parent termination
+setsid()
+changing the working directory
+redirecting standard file descriptors
+PID file creation
+7. Packet Capture Tool
+
+pcap_tool.c uses libpcap to inspect network traffic.
+
+The tool demonstrates:
+
+opening a live network interface
+packet capture
+BPF filtering
+Ethernet frame parsing
+IPv4 parsing
+TCP parsing
+NetForge application-protocol inspection
+Build
+Requirements
+
+Linux / WSL Ubuntu
+
+Install the required packages:
+
+sudo apt update
+sudo apt install build-essential libpcap-dev
+
+Build the project:
+
+make
+
+Compiled binaries are placed in:
+
+build/
+
+Build artifacts are intentionally ignored by Git.
+
+Running
+TCP Server
+
+Example:
+
 ./build/server --port 9090
-```
+TCP Client
 
-Terminal 2, 3, … — clients:
-```bash
-./build/client --port 9090
-```
+Connect the client to the running server using the command-line options supported by the client.
 
-Type in any client. The message appears in all others. `Ctrl+C` the server for clean shutdown.
+Multiple clients can be connected simultaneously to test concurrent communication and broadcasting.
 
-### Phase 7: daemon mode
-```bash
-./build/server --daemon --port 9090
-# Server detaches. PID written to ./netforge.pid
-kill $(cat netforge.pid)
-```
+Epoll Server
+./build/epoll_server
+UDP Server
+./build/udp_server
+Packet Capture Tool
 
-### Phase 9: epoll server (single thread)
-```bash
-./build/epoll_server --port 9090
-# Confirm single thread: ps -T -p $(pgrep epoll_server)
-```
-Same clients work unchanged.
+The packet capture tool requires libpcap and may require appropriate Linux privileges depending on the network interface and capture configuration.
 
-### Phase 10: UDP echo
-```bash
-./build/udp_server --port 9091
-# Test:
-echo "hello" | nc -u localhost 9091
-```
+Testing
 
-### Phase 11: libpcap live capture
-```bash
-# Terminal 1: run the server
-./build/server --port 9090
+Run the complete project test suite:
 
-# Terminal 2: capture (needs root for raw socket)
-sudo ./build/pcap_tool --port 9090 --iface lo
+./test_all.sh
 
-# Terminals 3+: connect clients and chat
-./build/client --port 9090
-```
-The pcap tool prints `NetForge frame: declared payload = N bytes` and a content preview for every message sent.
+The test script exercises the implemented networking components and verifies expected system behavior.
 
-### Phase 8: Wireshark / tcpdump inspection
+Networking Concepts Demonstrated
 
-Capture your protocol on the wire:
-```bash
-# Capture to file (no Wireshark needed)
-sudo tcpdump -i lo -w capture.pcap port 9090
+NetForge focuses on practical implementation of:
 
-# Run server + clients in other terminals, then stop tcpdump with Ctrl+C
+TCP vs UDP
+Client-server architecture
+TCP byte streams
+Message framing
+Partial reads and writes
+Network byte order
+Socket lifecycle
+Blocking I/O
+Concurrent processes
+POSIX threads
+Mutex synchronization
+Signal handling
+Zombie-process prevention
+SIGPIPE
+Linux epoll
+Event-driven I/O
+Daemon processes
+Packet capture
+Ethernet/IP/TCP packet parsing
+Learning Goals
 
-# Inspect with tcpdump (text mode)
-tcpdump -r capture.pcap -X port 9090 | head -60
+The primary goal of NetForge is to understand the systems underneath network applications.
 
-# Or open capture.pcap in Wireshark on Windows
-# Look for the 4-byte big-endian length in the hex pane
-# (e.g. "hello" = 5 bytes → header = 00 00 00 05, payload = 68 65 6c 6c 6f)
-```
+The project is intentionally implemented close to the Linux socket and process/thread APIs so that concepts such as:
 
-## Key concepts by phase
+socket
+   ↓
+bind
+   ↓
+listen
+   ↓
+accept
+   ↓
+read/write
+   ↓
+concurrency
+   ↓
+protocol framing
+   ↓
+event-driven I/O
 
-| Phase | Concept to understand |
-|-------|-----------------------|
-| 1 | `accept()` returns a NEW fd; the listening fd stays open |
-| 1 | `htons()`/`htonl()` — why byte order matters across networks |
-| 1 | `SO_REUSEADDR` — prevents `Address already in use` on restart |
-| 2 | `fork()` duplicates the fd table; both parent and child must close what they don't own |
-| 2 | `SIGCHLD` + `waitpid(WNOHANG)` — reaping zombie processes |
-| 3 | Shared address space between threads — faster than fork, more dangerous |
-| 3 | Race condition on `client_list[]` → deliberate bug → `pthread_mutex_t` fix |
-| 3 | `pthread_detach()` — thread zombie prevention |
-| 4 | TCP is a byte stream: one `write()` ≠ one `read()` |
-| 4 | `read_n_bytes()` — the loop that actually solves short reads |
-| 5 | Write under mutex; handle `write()` failure mid-broadcast gracefully |
-| 6 | `volatile sig_atomic_t` — why signal handlers need special variable types |
-| 6 | `SIGPIPE` → `SIG_IGN` — don't let a disconnected client kill the server |
-| 7 | Double-fork pattern — why two `fork()` calls are needed to detach fully |
-| 9 | Level-triggered vs edge-triggered epoll |
-| 9 | One thread, N connections: you become the scheduler |
-| 10 | `SOCK_DGRAM`: connectionless, message-oriented, no framing needed |
-| 11 | `ihl * 4` + `doff * 4` — navigating variable-length IP/TCP headers |
-| 11 | BPF filters run in the kernel — far more efficient than userspace filtering |
+can be understood through actual implementation.
 
-## Resume bullet (fill in what you've actually built)
+Development Approach
 
-> Built **NetForge**, a multithreaded TCP/UDP server in C, supporting concurrent client connections via both pthreads and an epoll-based event loop, with a custom length-prefixed message protocol validated via libpcap packet capture; implemented graceful shutdown via signal handling and optional process daemonization.
+NetForge is developed incrementally using Git.
 
-Trim to match exactly what you finished. A bullet for Phases 1–6 only is already interview-proof.
+Major components are introduced through separate commits so that the evolution of the networking stack can be studied through the Git history.
 
-## Phase 12 (deferred)
+Author
 
-Once a separate kernel character device driver project exists, point the server's message storage at `/dev/mychardev` instead of the in-memory buffer. See the handbook for details.
+Uttam Chaurasia
