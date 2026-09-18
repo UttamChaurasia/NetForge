@@ -1,0 +1,22 @@
+# Build artifacts
+build/*
+!build/.gitkeep
+*.o
+*.a
+*.so
+
+# Runtime files
+*.pid
+*.log
+
+# Packet captures
+*.pcap
+*.pcapng
+
+# Editor / OS files
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+
